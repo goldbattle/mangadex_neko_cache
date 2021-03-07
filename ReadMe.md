@@ -11,10 +11,11 @@ The server will try to download the latest chapters for that manga if possible.
 
 This has been tested on Python 3.7 on a windows machine with PyCharm.
 You will need to download the following packages and ensure you have enough space on disk to download images.
+The original MangaDex downloading code is based off of [mangadex-dl](https://github.com/frozenpandaman/mangadex-dl) but has since been modified to download chapters in our format and rate limiting.
 
 ```
 pip install flask
-pip install cloudscraper
+pip install ratelimit
 ```
 
 

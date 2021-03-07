@@ -1,12 +1,17 @@
+import html
+import json
+import os
+import re
 import threading
-import cloudscraper
-import time, os, sys, re, json, html, random
-#import mangadex_dl  # pip install cloudscraper
+import requests
 
+from ratelimit import limits, RateLimitException  # pip install ratelimit
+from backoff import on_exception, expo  # pip install backoff
 
 # only have one thread at a time go out to mangadex
 # https://stackoverflow.com/a/23524451
 threadLimiter = threading.BoundedSemaphore(1)
+
 
 def pad_filename(str):
     digits = re.compile('(\\d+)')
@@ -33,8 +38,33 @@ def zpad(num):
         return num.zfill(3)
 
 
-class Download(threading.Thread):
+@on_exception(expo, RateLimitException, max_tries=3)
+@limits(calls=60, period=60)
+def call_mangadex_api(url):
+    cookies = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:71.0) Gecko/20100101 Firefox/77.0'
+    }
+    response = requests.get(url, headers=headers, cookies=cookies)
+    if response.status_code != 200:
+        raise Exception('API response: {}'.format(response.status_code))
+    return response
 
+
+@on_exception(expo, RateLimitException, max_tries=3)
+@limits(calls=200, period=60)
+def call_mangadex_images(url):
+    cookies = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:71.0) Gecko/20100101 Firefox/77.0'
+    }
+    response = requests.get(url, headers=headers, cookies=cookies)
+    if response.status_code != 200:
+        raise Exception('API response: {}'.format(response.status_code))
+    return response
+
+
+class Download(threading.Thread):
     total_file_count = 0
     total_processed_count = 0
 
@@ -58,13 +88,13 @@ class Download(threading.Thread):
             "status": self.error_code,
             "message_error": self.error_message,
             "message": self.message,
-            "percent": float(self.percent_done()),
+            "percent": self.percent_done(),
         }
 
     def percent_done(self):
         if self.total_file_count == 0:
             return 0.0
-        return float(self.total_processed_count) / float(self.total_file_count)
+        return float(self.total_processed_count) / float(self.total_file_count) * 100.0
 
     def run(self):
         global threadLimiter
@@ -80,12 +110,11 @@ class Download(threading.Thread):
     def run_self(self):
 
         # grab manga info json from api
-        scraper = cloudscraper.create_scraper()
         url = "https://api.mangadex.{}/v2/manga/{}/?include=chapters".format(self.tld, self.manga_id)
         response_code = 200
         try:
             print(url)
-            r = scraper.get(url)
+            r = call_mangadex_api(url)
             response_code = r.status_code
             print(r.text)
             jason = json.loads(r.text)
@@ -120,41 +149,43 @@ class Download(threading.Thread):
         for chapter_info in chaps_to_dl:
 
             # download the page
-            self.message += "Downloading chapter {}...\n".format(chapter_info[1])
+            self.message += "Getting chapter API {}...\n".format(chapter_info[1])
             url = "https://api.mangadex.{}/v2/chapter/{}/".format(self.tld, chapter_info[1])
             response_code = 200
             try:
                 print(url)
-                r = scraper.get(url)
+                r = call_mangadex_api(url)
                 response_code = r.status_code
                 print(r.text)
                 chapter = json.loads(r.text)
             except (json.decoder.JSONDecodeError, ValueError) as err:
                 self.error_code = response_code
-                self.error_message += ("MangaDex code {} error: {}".format(response_code, err))
-                return
+                self.error_message += ("MangaDex code {} error: {}\n".format(response_code, err))
+                continue
             except:
                 self.error_code = response_code
-                self.error_message += "Error with URL: {}".format(url)
-                return
-            chapters.append(chapter)
+                self.error_message += "Error with URL: {}\n".format(url)
+                continue
 
-            # get url list
-            images = []
-            server = chapter["data"]["server"]
-            if "mangadex." not in server:
-                server = chapter["data"]["serverFallback"]  # https://s2.mangadex.org/data/
-            hashcode = chapter["data"]["hash"]
-            for page in chapter["data"]["pages"]:
-                images.append("{}{}/{}".format(server, hashcode, page))
-            chapter_images.append(images)
-            self.total_file_count += len(images)
+            # get url list, might fail if no images are present
+            try:
+                images = []
+                images_fallback = []
+                server = chapter["data"]["server"]
+                hashcode = str(chapter["data"]["id"])
+                for page in chapter["data"]["pages"]:
+                    images.append("{}{}/{}".format(server, hashcode, page))
+                    images_fallback.append("{}{}/{}".format(server, hashcode, page))
+                chapters.append(chapter)
+                chapter_images.append(images)
+                self.total_file_count += len(images)
+            except:
+                pass
 
         # now lets loop through our images and actually download them
-        for idx, chapter_info in enumerate(chaps_to_dl):
+        for idx, chapter in enumerate(chapters):
 
             # get our corresponding chapter
-            chapter = chapters[idx]
             images = chapter_images[idx]
 
             # download images
@@ -163,7 +194,8 @@ class Download(threading.Thread):
                 # get the save location
                 filename = os.path.basename(url)
                 ext = os.path.splitext(filename)[1]
-                dest_folder = os.path.join(os.getcwd(), "download", str(chapter["data"]["mangaId"]), chapter["data"]["hash"])
+                dest_folder = os.path.join(os.getcwd(), "download", str(chapter["data"]["mangaId"]),
+                                           str(chapter["data"]["id"]))
                 if not os.path.exists(dest_folder):
                     os.makedirs(dest_folder)
                 dest_filename = pad_filename("{}{}".format(pagenum, ext))
@@ -177,25 +209,16 @@ class Download(threading.Thread):
 
                 # actually try to download the file
                 # will silently try again if it fails
-                r = scraper.get(url)
-                if r.status_code == 200:
+                try:
+                    print(url)
+                    r = call_mangadex_images(url)
+                    assert r.status_code == 200
                     with open(outfile, 'wb') as f:
                         f.write(r.content)
                         self.message += " Downloaded page {}.\n".format(pagenum)
-                else:
-                    time.sleep(3)
-                    r = scraper.get(url)
-                    if r.status_code == 200:
-                        with open(outfile, 'wb') as f:
-                            f.write(r.content)
-                            self.message += " Downloaded page {}.\n".format(pagenum)
-                    else:
-                        self.error_code = 500
-                        self.message += " Skipping download of page {} - error {}.\n".format(pagenum, r.status_code)
-                        self.error_message += " Skipping download of page {} - error {}.\n".format(pagenum, r.status_code)
-                time.sleep(1)
+                except Exception as e:
+                    self.error_code = 500
+                    self.error_message += " Skipping download of page {} - {}.\n".format(pagenum, e)
+                self.total_processed_count += 1
 
         self.message += "Done!"
-
-
-

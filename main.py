@@ -1,8 +1,8 @@
-import io
 import os
-import threading
-import download  # pip install cloudscraper
+
 from flask import Flask, jsonify, abort, send_from_directory  # pip install flask
+
+import download  # pip install cloudscraper
 
 app = Flask(__name__)
 active_downloads = []
@@ -21,7 +21,14 @@ def manga_info(mangaid):
     search_dir = os.path.join(os.getcwd(), "download", str(mangaid))
     if not os.path.exists(search_dir):
         abort(404)
-    return jsonify(os.listdir(search_dir))
+    directories = []
+    for dir_c in os.listdir(search_dir):
+        dir_i = os.path.join(search_dir, dir_c)
+        if len(os.listdir(dir_i)) != 0:
+            directories.append(dir_i)
+    if len(directories) == 0:
+        abort(404)
+    return jsonify(directories)
 
 
 @app.route('/chapter/<chapterid>/', methods=['GET'])
@@ -40,6 +47,8 @@ def manga_chapter(chapterid):
         if found:
             break
     if not found or not os.path.exists(search_dir_chapter):
+        abort(404)
+    if len(os.listdir(search_dir_chapter)) == 0:
         abort(404)
     return jsonify(os.listdir(search_dir_chapter))
 
