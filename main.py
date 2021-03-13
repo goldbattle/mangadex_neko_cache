@@ -25,7 +25,7 @@ def manga_info(mangaid):
     for dir_c in os.listdir(search_dir):
         dir_i = os.path.join(search_dir, dir_c)
         if len(os.listdir(dir_i)) != 0:
-            directories.append(dir_i)
+            directories.append(dir_c)
     if len(directories) == 0:
         abort(404)
     return jsonify(directories)
@@ -84,13 +84,27 @@ def manga_download(mangaid):
     return jsonify(thread.information())
 
 
-@app.route('/images/<path:path>')
-def image_fetch(path):
+@app.route('/images/<chapterid>/<path:path>')
+def image_fetch(chapterid, path):
     search_dir = os.path.join(os.getcwd(), "download")
     if not os.path.exists(search_dir):
         abort(404)
-    return send_from_directory(search_dir, path)
+    found = False
+    search_dir_chapter = ""
+    for dir_m in os.listdir(search_dir):
+        for dir_c in os.listdir(os.path.join(search_dir, dir_m)):
+            if os.path.basename(dir_c) == chapterid:
+                search_dir_chapter = os.path.join(search_dir, dir_m, dir_c)
+                found = True
+                break
+        if found:
+            break
+    if not found or not os.path.exists(search_dir_chapter):
+        abort(404)
+    return send_from_directory(search_dir_chapter,path)
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    host = "192.168.1.152"
+    port = 5000
+    app.run(host=host, port=port, debug=True)

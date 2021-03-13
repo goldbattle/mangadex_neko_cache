@@ -12,7 +12,6 @@ from backoff import on_exception, expo  # pip install backoff
 # https://stackoverflow.com/a/23524451
 threadLimiter = threading.BoundedSemaphore(1)
 
-
 def pad_filename(str):
     digits = re.compile('(\\d+)')
     pos = digits.search(str)
@@ -172,10 +171,9 @@ class Download(threading.Thread):
                 images = []
                 images_fallback = []
                 server = chapter["data"]["server"]
-                hashcode = str(chapter["data"]["id"])
+                hashcode = chapter["data"]["hash"]
                 for page in chapter["data"]["pages"]:
                     images.append("{}{}/{}".format(server, hashcode, page))
-                    images_fallback.append("{}{}/{}".format(server, hashcode, page))
                 chapters.append(chapter)
                 chapter_images.append(images)
                 self.total_file_count += len(images)

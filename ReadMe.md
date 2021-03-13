@@ -41,7 +41,7 @@ pip install ratelimit
 ]
 ```
 
-- **/chapter/<chapter_hash>/** -- This will list all the current images for this that have been downloaded on the server.
+- **/chapter/<chapter_id>/** -- This will list all the current images for this that have been downloaded on the server.
 
 ```
 [
@@ -68,6 +68,9 @@ pip install ratelimit
     "status": 502
 }
 ```
+
+- **/image/<chapter_id>/** -- Will return a specific image from that chapter, 404 otherwise if images is not there.
+
 
 
 
